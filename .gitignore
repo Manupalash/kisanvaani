@@ -1,0 +1,39 @@
+cat > .gitignore <<'EOF'
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Audio and generated files
+backend/storage/audio/*
+!backend/storage/audio/.gitkeep
+
+# Node
+node_modules/
+.next/
+out/
+dist/
+
+# Build artifacts
+coverage/
+*.log
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+EOF
