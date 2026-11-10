@@ -12,6 +12,16 @@ FastAPI checks the 10 MB limit, identifies the audio container from bytes, verif
 
 Configure `GNANI_API_KEY`, `GNANI_STT_URL` (default official endpoint), `GNANI_TIMEOUT_SECONDS` (default 45), `FFMPEG_BINARY` (default `ffmpeg`), `DATABASE_URL`, `FRONTEND_ORIGINS`, `APP_NAME`, and `API_V1_PREFIX` in the backend environment. Install FFmpeg and ensure the configured binary is available to the backend process.
 
+## Phase 2C text-to-speech
+
+The assistant answer includes an on-demand play control. The browser posts the exact displayed answer to `POST /api/v1/voice/synthesize`; the response is streamed to a local object URL for playback and is released when replaced or when the component unmounts. TTS failure leaves the text response intact and exposes a retry control. No generated audio is persisted.
+
+The backend calls the documented Gnani Timbre endpoint `https://api.vachana.ai/api/v1/tts/inference` using `X-API-Key-ID` and the same backend-only `GNANI_API_KEY` used for Prisma. Its JSON request includes `text`, `voice`, `model=timbre-v2.5`, `language`, and mono 48 kHz linear PCM WAV `audio_config`. The server validates the response MIME type and WAV/MP3/OGG signature before returning bytes with `Cache-Control: no-store`. If Gnani marks WAV lengths as unknown with all-ones RIFF/data sizes, the server fills those sizes from the received bytes to support standard browser playback. Only WAV generation is requested in this implementation.
+
+Configuration (`backend/.env`, template in both `.env.example` files): `GNANI_TTS_URL`, `GNANI_TTS_MODEL`, `GNANI_TTS_DEFAULT_LANGUAGE`, `GNANI_TTS_TELUGU_VOICE`, `GNANI_TTS_ENGLISH_VOICE`, `GNANI_TTS_TIMEOUT_SECONDS`, `GNANI_TTS_MAX_RETRIES` (capped at two retries), and `GNANI_TTS_MAX_TEXT_CHARS`. Default voices are Yukti (Telugu) and Shlok (English). The UI selects `te-IN` for Telugu text, `en-IN` for English, and `auto` for mixed Telugu/Latin text; this reflects Gnani's documented script-based auto mode. Selectable voice names must match the documented catalog for the requested language.
+
+The official API reference and voice catalog are [TTS inference](https://docs.gnani.ai/api/TTS/tts-inference) and [available voices](https://docs.gnani.ai/api/TTS/available-voices). The one-request live diagnostic is `cd backend && python scripts/test_gnani_tts.py`. It checks configuration without showing secrets and verifies the returned WAV in memory has nonzero duration; it does not write audio to disk. A mocked test pass is not evidence of live API availability; a usable key must have Timbre access and credits.
+
 ## Phase 2B retrieval and reasoning
 
 `POST /api/v1/assistant/chat` validates the farmer/conversation relationship, loads registered crops and recent messages, detects crop/topic phrases in English and Telugu, retrieves source-linked records from SQLite, calls the configured provider, applies an agricultural safety guard, then saves both messages. The response returns the answer, language, conversation ID and retrieved source content/metadata. Sources come only from database documents; model-generated URLs are not used.

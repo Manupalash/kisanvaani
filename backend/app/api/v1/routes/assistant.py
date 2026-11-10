@@ -23,7 +23,20 @@ _MIX_PATTERN = re.compile(r"\b(?:mix|combine|tank mix)\b[^.\n]{0,100}\b(?:pestic
 def detect_language(text: str) -> str:
     has_telugu = any("\u0c00" <= char <= "\u0c7f" for char in text)
     has_latin = any(char.isascii() and char.isalpha() for char in text)
-    return "te-en" if has_telugu and has_latin else "te" if has_telugu else "en"
+    # Farmers often write Telugu in Latin script. Recognize common Telugu
+    # transliterations without requiring Telugu keyboard input.
+    transliterated_telugu = {
+        "cheyyali", "cheyali", "vastunnayi", "vastunnai", "vastundi", "avutundi",
+        "avuthundi", "undi", "unnayi", "panta", "pantalo", "em", "ela", "enduku",
+        "ekkada", "eppudu", "ivvandi", "cheppandi", "chesukovali", "lo", "ki", "ku",
+    }
+    tokens = set(re.findall(r"[a-z]+", text.casefold()))
+    has_transliterated_telugu = bool(tokens & transliterated_telugu)
+    if has_telugu and has_latin or (has_transliterated_telugu and has_latin):
+        return "te-en"
+    if has_telugu or has_transliterated_telugu:
+        return "te"
+    return "en"
 
 
 def validate_answer_safety(answer: str, language: str) -> str:

@@ -81,10 +81,56 @@ def test_retrieval_relevance_source_attribution_and_persistence(app_client):
     assert [message["role"] for message in messages] == ["user", "assistant"]
 
 
+def test_phase_three_conversation_examples_keep_context_sources_and_language(app_client):
+    farmer_id, conversation_id = app_client.test_ids
+    examples = [
+        ("What is the best way to manage water for rice cultivation?", "en"),
+        ("వరి పంటలో నీటి యాజమాన్యం ఎలా ఉండాలి?", "te"),
+        ("Rice crop lo yellow leaves vastunnayi, em cheyyali?", "te-en"),
+        ("How can I prevent this problem?", "en"),
+    ]
+    for index, (message, expected_language) in enumerate(examples):
+        response = app_client.post("/api/v1/assistant/chat", json={
+            "farmer_id": farmer_id,
+            "conversation_id": conversation_id,
+            "message": message,
+            "request_id": f"phase3-example-{index}",
+        })
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["language"] == expected_language
+        assert body["conversation_id"] == conversation_id
+        assert body["retrieved_sources"]
+        assert all(source["source_name"] and source["source_url"].startswith("https://") for source in body["retrieved_sources"])
+        assert body["answer"]
+    history = app_client.test_provider.last_context["history"]
+    assert any("yellow leaves" in turn["content"].lower() for turn in history)
+    assert app_client.test_provider.last_context["question"] == "How can I prevent this problem?"
+    assert "crops: వరి Paddy" in app_client.test_provider.last_context["farmer_context"]
+    messages = app_client.get(f"/api/v1/conversations/{conversation_id}/messages").json()
+    assert len(messages) == 8
+    assert [item["role"] for item in messages] == ["user", "assistant"] * 4
+
+
 @pytest.mark.parametrize("message,language", [("వరి ఆకులు పసుపు", "te"), ("My paddy leaves are yellow", "en"), ("వరి leaves yellow అవుతున్నాయి", "te-en")])
 def test_language_detection(app_client, message, language):
     from app.api.v1.routes.assistant import detect_language
     assert detect_language(message) == language
+
+
+def test_latin_script_telugu_code_mixed_question_is_detected(app_client):
+    from app.api.v1.routes.assistant import detect_language
+    from app.services.knowledge_service import identify_crops_and_topics
+
+    message = "Rice crop lo yellow leaves vastunnayi, em cheyyali?"
+    assert detect_language(message) == "te-en"
+    crops, _ = identify_crops_and_topics(message)
+    assert "rice" in crops
+    db = next(app.dependency_overrides[get_db]())
+    try:
+        assert retrieve_documents(db, message, ["వరి Paddy"])
+    finally:
+        db.close()
 
 
 def test_missing_agricultural_context_returns_retrieval_empty(app_client):
@@ -102,6 +148,20 @@ def test_safety_guard_blocks_dosages_and_definitive_diagnosis(app_client, unsafe
     assert "dose" in safe.lower() or "diagnosis" in safe.lower()
 
 
+def test_crop_symptom_questions_can_return_a_clarifying_follow_up(app_client):
+    farmer_id, conversation_id = app_client.test_ids
+    app_client.test_provider.answer_text = "How many plants are affected, what stage is the rice crop at, and can you share a clear photo?"
+    response = app_client.post("/api/v1/assistant/chat", json={
+        "farmer_id": farmer_id,
+        "conversation_id": conversation_id,
+        "message": "Rice crop lo yellow leaves vastunnayi, em cheyyali?",
+        "request_id": "missing-context-follow-up-001",
+    })
+    assert response.status_code == 200
+    assert "How many plants" in response.json()["answer"]
+    assert response.json()["language"] == "te-en"
+
+
 def test_provider_failure_does_not_persist_messages(app_client):
     farmer_id, conversation_id = app_client.test_ids
     class BrokenProvider:
@@ -111,6 +171,35 @@ def test_provider_failure_does_not_persist_messages(app_client):
         response = app_client.post("/api/v1/assistant/chat", json={"farmer_id": farmer_id, "conversation_id": conversation_id, "message": "Paddy question"})
         assert response.status_code == 502
         assert app_client.get(f"/api/v1/conversations/{conversation_id}/messages").json() == []
+    finally:
+        app.dependency_overrides[get_reasoning_provider] = lambda: app_client.test_provider
+
+
+def test_provider_failure_can_be_retried_without_duplicate_messages(app_client):
+    farmer_id, conversation_id = app_client.test_ids
+
+    class FlakyProvider:
+        def __init__(self):
+            self.fail = True
+
+        async def answer(self, **kwargs):
+            if self.fail:
+                self.fail = False
+                raise RuntimeError("temporary provider failure")
+            return "Check the rice crop stage and field conditions."
+
+    provider = FlakyProvider()
+    app.dependency_overrides[get_reasoning_provider] = lambda: provider
+    body = {"farmer_id": farmer_id, "conversation_id": conversation_id, "message": "Rice irrigation question", "request_id": "temporary-retry-001"}
+    try:
+        first = app_client.post("/api/v1/assistant/chat", json=body)
+        assert first.status_code == 502
+        assert app_client.get(f"/api/v1/conversations/{conversation_id}/messages").json() == []
+        retried = app_client.post("/api/v1/assistant/chat", json=body)
+        repeated = app_client.post("/api/v1/assistant/chat", json=body)
+        assert retried.status_code == repeated.status_code == 200
+        rows = app_client.get(f"/api/v1/conversations/{conversation_id}/messages").json()
+        assert [item["role"] for item in rows] == ["user", "assistant"]
     finally:
         app.dependency_overrides[get_reasoning_provider] = lambda: app_client.test_provider
 

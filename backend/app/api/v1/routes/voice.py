@@ -1,12 +1,14 @@
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db.session import get_db
 from app.models import Conversation, Farmer, Message
 from app.schemas.voice import TranscriptionResponse
+from app.schemas.tts import SynthesizeRequest
 from app.services.audio_service import prepare_audio
 from app.services.prisma_service import PrismaService
+from app.services.tts_service import TimbreTTSService
 
 router = APIRouter()
 
@@ -47,3 +49,15 @@ async def transcribe_voice(
         db.add(Message(conversation_id=conversation_id, role="user", text=result["transcript"]))
         db.commit()
     return result
+
+
+@router.post("/synthesize", responses={200: {"content": {"audio/wav": {}, "audio/mpeg": {}, "audio/ogg": {}}}})
+async def synthesize_voice(request: SynthesizeRequest):
+    """Return actual Timbre speech bytes; the assistant's text answer remains independently available."""
+    language = request.language or settings.gnani_tts_default_language
+    result = await TimbreTTSService().synthesize(request.text, language, request.voice)
+    return Response(
+        content=result.content,
+        media_type=result.media_type,
+        headers={"Cache-Control": "no-store", "X-Audio-Model": result.model},
+    )

@@ -48,6 +48,28 @@ export type AssistantSource = { id: number; title: string; content: string; sour
 export type AssistantReply = { answer: string; language: string; retrieved_sources: AssistantSource[]; conversation_id: number };
 export const assistantApi = {
   chat: (farmerId: number, conversationId: number, message: string, requestId?: string) => api<AssistantReply>("/assistant/chat", { method: "POST", body: JSON.stringify({ farmer_id: farmerId, conversation_id: conversationId, message, request_id: requestId }) }),
+  synthesize: async (text: string, language: "te-IN" | "en-IN" | "auto", voice?: string) => {
+    let response: Response;
+    try {
+      response = await fetch(`${API_BASE}/voice/synthesize`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, language, ...(voice ? { voice } : {}) }),
+      });
+    } catch {
+      throw new ApiError("Could not reach KisanVaani to generate audio.", 0);
+    }
+    if (!response.ok) {
+      let message = `Speech generation failed (${response.status}).`;
+      try { const body = await response.json(); message = body.detail || message; } catch { /* use status message */ }
+      throw new ApiError(message, response.status);
+    }
+    const contentType = response.headers.get("Content-Type")?.split(";")[0].trim() || "";
+    if (!contentType.startsWith("audio/")) throw new ApiError("The speech service returned an invalid audio response.", 502);
+    const audio = await response.blob();
+    if (!audio.size) throw new ApiError("The speech service returned empty audio.", 502);
+    return audio;
+  },
 };
 export type Transcription = { success: true; transcript: string; model: string; request_id: string | null; language: string };
 export const transcribeAudio = async (blob: Blob, mimeType: string, duration: number, farmerId?: number, conversationId?: number) => {

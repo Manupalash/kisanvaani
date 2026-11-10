@@ -13,6 +13,14 @@ class Settings(BaseSettings):
     gnani_api_key: str | None = None
     gnani_stt_url: str = "https://api.vachana.ai/stt/v3"
     gnani_timeout_seconds: float = 45.0
+    gnani_tts_url: str = "https://api.vachana.ai/api/v1/tts/inference"
+    gnani_tts_model: str = "timbre-v2.5"
+    gnani_tts_default_language: str = "te-IN"
+    gnani_tts_telugu_voice: str = "Yukti"
+    gnani_tts_english_voice: str = "Shlok"
+    gnani_tts_timeout_seconds: float = 45.0
+    gnani_tts_max_retries: int = 2
+    gnani_tts_max_text_chars: int = 5000
     ffmpeg_binary: str = "ffmpeg"
     assistant_provider: str = "none"
     openai_api_key: str | None = None
